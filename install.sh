@@ -494,6 +494,59 @@ display_existing_keys() {
     fi
 }
 
+# Generate unique SSH key name for this server
+generate_unique_key_name() {
+    local hostname=$(hostname)
+    local timestamp=$(date +%Y%m%d_%H%M)
+    local random_suffix=$(openssl rand -hex 3 2>/dev/null || echo "$(date +%s | tail -c 4)")
+    
+    # Clean hostname to be filesystem-safe
+    hostname=$(echo "$hostname" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9-]/_/g')
+    
+    echo "backup_${hostname}_${timestamp}_${random_suffix}"
+}
+
+# Test SSH key with Git provider
+test_ssh_key() {
+    local ssh_key_path="$1"
+    local git_repo="$2"
+    
+    # Extract hostname from Git URL
+    local git_host=""
+    if [[ "$git_repo" =~ git@([^:]+): ]]; then
+        git_host="${BASH_REMATCH[1]}"
+    else
+        return 1
+    fi
+    
+    info "Testing SSH key with $git_host..."
+    
+    # Test SSH connection with specific key
+    local ssh_test_result=""
+    case "$git_host" in
+        "github.com")
+            ssh_test_result=$(sudo -u "$BACKUP_USER" ssh -i "$ssh_key_path" -T git@github.com 2>&1 || true)
+            if echo "$ssh_test_result" | grep -q "successfully authenticated"; then
+                return 0
+            fi
+            ;;
+        "gitlab.com")
+            ssh_test_result=$(sudo -u "$BACKUP_USER" ssh -i "$ssh_key_path" -T git@gitlab.com 2>&1 || true)
+            if echo "$ssh_test_result" | grep -q "Welcome"; then
+                return 0
+            fi
+            ;;
+        *)
+            ssh_test_result=$(sudo -u "$BACKUP_USER" ssh -i "$ssh_key_path" -T "git@$git_host" 2>&1 || true)
+            if echo "$ssh_test_result" | grep -qE "(Welcome|successfully authenticated|Hi)"; then
+                return 0
+            fi
+            ;;
+    esac
+    
+    return 1
+}
+
 # Setup SSH key for Git (for backup user)
 setup_ssh_key() {
     echo
@@ -554,8 +607,8 @@ setup_ssh_key() {
                 
                 local ssh_key_path="$ssh_dir/$selected_key"
             else
-                # Generate new key
-                local ssh_key_path="$ssh_dir/id_rsa"
+                # Generate new key with unique name
+                local unique_key_name=$(generate_unique_key_name)
                 
                 # Ask for key type
                 echo "SSH key types:"
@@ -566,20 +619,21 @@ setup_ssh_key() {
                 key_type_choice=${key_type_choice:-2}
                 
                 if [[ "$key_type_choice" == "1" ]]; then
-                    ssh_key_path="$ssh_dir/id_rsa"
-                    info "Generating RSA SSH key for $BACKUP_USER..."
+                    ssh_key_path="$ssh_dir/${unique_key_name}_rsa"
+                    info "Generating RSA SSH key for $BACKUP_USER with unique name: ${unique_key_name}_rsa"
                     sudo -u "$BACKUP_USER" ssh-keygen -t rsa -b 4096 -C "$git_email" -f "$ssh_key_path" -N ""
                 else
-                    ssh_key_path="$ssh_dir/id_ed25519"
-                    info "Generating Ed25519 SSH key for $BACKUP_USER..."
+                    ssh_key_path="$ssh_dir/${unique_key_name}_ed25519"
+                    info "Generating Ed25519 SSH key for $BACKUP_USER with unique name: ${unique_key_name}_ed25519"
                     sudo -u "$BACKUP_USER" ssh-keygen -t ed25519 -C "$git_email" -f "$ssh_key_path" -N ""
                 fi
                 
                 success "SSH key generated at $ssh_key_path"
             fi
         else
-            # No existing keys, generate new one
+            # No existing keys, generate new one with unique name
             info "No existing SSH keys found for $BACKUP_USER. Generating new key..."
+            local unique_key_name=$(generate_unique_key_name)
             
             echo "SSH key types:"
             echo "1. RSA (4096-bit) - Most compatible"
@@ -589,12 +643,12 @@ setup_ssh_key() {
             key_type_choice=${key_type_choice:-2}
             
             if [[ "$key_type_choice" == "1" ]]; then
-                local ssh_key_path="$ssh_dir/id_rsa"
-                info "Generating RSA SSH key for $BACKUP_USER..."
+                local ssh_key_path="$ssh_dir/${unique_key_name}_rsa"
+                info "Generating RSA SSH key for $BACKUP_USER with unique name: ${unique_key_name}_rsa"
                 sudo -u "$BACKUP_USER" ssh-keygen -t rsa -b 4096 -C "$git_email" -f "$ssh_key_path" -N ""
             else
-                local ssh_key_path="$ssh_dir/id_ed25519"
-                info "Generating Ed25519 SSH key for $BACKUP_USER..."
+                local ssh_key_path="$ssh_dir/${unique_key_name}_ed25519"
+                info "Generating Ed25519 SSH key for $BACKUP_USER with unique name: ${unique_key_name}_ed25519"
                 sudo -u "$BACKUP_USER" ssh-keygen -t ed25519 -C "$git_email" -f "$ssh_key_path" -N ""
             fi
             
@@ -629,39 +683,47 @@ setup_ssh_key() {
         
         read -p "Press Enter after adding the key to your Git provider..."
         
-        # Test SSH connection based on provider (as backup user)
-        info "Testing SSH connection as $BACKUP_USER..."
-        local ssh_test_result=""
+        # Test SSH connection using the specific key (as backup user)
+        info "Testing SSH connection as $BACKUP_USER using key: $(basename "$ssh_key_path")"
         
-        if [[ "$git_repo" =~ github\.com ]]; then
-            ssh_test_result=$(sudo -u "$BACKUP_USER" ssh -T git@github.com 2>&1 || true)
-            if echo "$ssh_test_result" | grep -q "successfully authenticated"; then
-                success "GitHub SSH authentication successful for $BACKUP_USER"
-            else
-                warning "GitHub SSH test failed. Output: $ssh_test_result"
-                echo "Make sure you've added the public key to your GitHub service account."
-            fi
-        elif [[ "$git_repo" =~ gitlab\.com ]]; then
-            ssh_test_result=$(sudo -u "$BACKUP_USER" ssh -T git@gitlab.com 2>&1 || true)
-            if echo "$ssh_test_result" | grep -q "Welcome"; then
-                success "GitLab SSH authentication successful for $BACKUP_USER"
-            else
-                warning "GitLab SSH test failed. Output: $ssh_test_result"
-                echo "Make sure you've added the public key to your GitLab service account."
-            fi
+        if test_ssh_key "$ssh_key_path" "$git_repo"; then
+            success "SSH authentication successful for $BACKUP_USER"
         else
-            # Extract hostname from SSH URL for custom Git servers
-            local git_host=$(echo "$git_repo" | sed -n 's/git@\([^:]*\):.*/\1/p')
-            if [[ -n "$git_host" ]]; then
-                ssh_test_result=$(sudo -u "$BACKUP_USER" ssh -T "git@$git_host" 2>&1 || true)
-                if echo "$ssh_test_result" | grep -qE "(Welcome|successfully authenticated|Hi)"; then
-                    success "SSH authentication successful for $BACKUP_USER on $git_host"
-                else
-                    warning "SSH test for $git_host inconclusive. Output: $ssh_test_result"
-                    echo "Make sure you've added the public key to your Git provider."
-                fi
+            warning "SSH authentication test failed"
+            echo "Make sure you've added the public key to your Git provider."
+            echo "You can test manually with:"
+            echo "  sudo -u $BACKUP_USER ssh -i $ssh_key_path -T git@<your-git-host>"
+        fi
+        
+        # Create SSH config to use the specific key for this repository
+        local ssh_config="$ssh_dir/config"
+        local git_host=""
+        if [[ "$git_repo" =~ git@([^:]+): ]]; then
+            git_host="${BASH_REMATCH[1]}"
+            
+            info "Creating SSH config to use specific key for $git_host"
+            
+            # Create or append to SSH config
+            if [[ ! -f "$ssh_config" ]]; then
+                touch "$ssh_config"
+                chmod 600 "$ssh_config"
+                chown "$BACKUP_USER:$BACKUP_USER" "$ssh_config"
+            fi
+            
+            # Add host configuration if not already present
+            if ! grep -q "Host $git_host" "$ssh_config"; then
+                cat >> "$ssh_config" << EOF
+
+# Configuration for $(hostname) backup service
+Host $git_host
+    HostName $git_host
+    User git
+    IdentityFile $ssh_key_path
+    IdentitiesOnly yes
+EOF
+                success "SSH config updated for $git_host"
             else
-                warning "Could not determine Git host for SSH testing"
+                info "SSH config for $git_host already exists"
             fi
         fi
         
