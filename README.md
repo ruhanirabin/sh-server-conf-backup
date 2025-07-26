@@ -86,12 +86,91 @@ For self-hosted Git servers (GitLab CE, Gitea, Forgejo, etc.):
 
 ## Quick Start
 
-### 1. Installation
+### 🚀 One-Line Installation
+
+For quick installation, you can download and run the installer directly from GitHub:
+
+#### **System-wide Installation (Recommended)**
+```bash
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/ruhanirabin/sh-server-conf-backup/main/install.sh)"
+```
+
+#### **User Installation**
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/ruhanirabin/sh-server-conf-backup/main/install.sh)"
+```
+
+#### **Alternative with wget**
+```bash
+# System-wide
+sudo bash -c "$(wget -qO- https://raw.githubusercontent.com/ruhanirabin/sh-server-conf-backup/main/install.sh)"
+
+# User installation
+bash -c "$(wget -qO- https://raw.githubusercontent.com/ruhanirabin/sh-server-conf-backup/main/install.sh)"
+```
+
+> **⚠️ Security Note**: The one-line installation downloads and executes the script directly. For production environments, we recommend reviewing the script first:
+> ```bash
+> # Review the installer before running
+> curl -fsSL https://raw.githubusercontent.com/ruhanirabin/sh-server-conf-backup/main/install.sh | less
+> 
+> # Then run if satisfied
+> sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/ruhanirabin/sh-server-conf-backup/main/install.sh)"
+> ```
+
+#### **What the One-Line Installer Does:**
+1. 🔽 Downloads the installer script from GitHub
+2. 🔽 Downloads the main backup script automatically
+3. 🔧 Detects your system and privileges
+4. 👤 Creates backup user (if running as root)
+5. 📦 Installs required packages (git, rsync, inotify-tools, curl, wget)
+6. ⚙️ Sets up configuration files
+7. 🔑 Helps configure SSH keys for Git authentication
+8. ✅ Creates system service (if applicable)
+
+#### **Quick Start Examples:**
+
+**Production Server Setup:**
+```bash
+# Install system-wide with full features
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/ruhanirabin/sh-server-conf-backup/main/install.sh)"
+
+# Initialize and configure
+server-backup init
+server-backup setup-webhook https://hooks.n8n.io/webhook/your-webhook-id
+server-backup backup --validate-first
+```
+
+**Development Server Setup:**
+```bash
+# Install as user with sudo
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/ruhanirabin/sh-server-conf-backup/main/install.sh)"
+
+# Quick test
+server-backup backup
+server-backup drift-check
+```
+
+**Personal/Testing Setup:**
+```bash
+# Install without special privileges
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/ruhanirabin/sh-server-conf-backup/main/install.sh)"
+
+# Basic usage
+server-backup show-config
+server-backup validate
+```
+
+### 📥 Manual Installation
 
 The installer supports multiple installation modes depending on your privileges:
 
 #### **System-wide Installation (Recommended)**
 ```bash
+# Clone repository
+git clone https://github.com/ruhanirabin/sh-server-conf-backup.git
+cd sh-server-conf-backup
+
 # Make scripts executable
 chmod +x install.sh server-config-backup.sh
 
@@ -101,12 +180,26 @@ sudo ./install.sh
 
 #### **User Installation (Limited)**
 ```bash
+# Clone repository
+git clone https://github.com/ruhanirabin/sh-server-conf-backup.git
+cd sh-server-conf-backup
+
+# Make scripts executable
+chmod +x install.sh server-config-backup.sh
+
 # Run as regular user (some features may be limited)
 ./install.sh
 ```
 
 #### **User Installation with Sudo**
 ```bash
+# Clone repository
+git clone https://github.com/ruhanirabin/sh-server-conf-backup.git
+cd sh-server-conf-backup
+
+# Make scripts executable
+chmod +x install.sh server-config-backup.sh
+
 # Run as user with sudo access (enhanced features)
 ./install.sh
 ```
@@ -524,6 +617,47 @@ ssh -T git@git.yourdomain.com
 - Simpler automation setup
 - Better security practices
 - Universal support across Git providers
+
+## 🔧 One-Line Installation Troubleshooting
+
+### **Common Issues:**
+
+#### **"curl: command not found"**
+```bash
+# Install curl first
+sudo apt-get update && sudo apt-get install curl
+
+# Then run the installer
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/ruhanirabin/sh-server-conf-backup/main/install.sh)"
+```
+
+#### **"Permission denied" errors**
+```bash
+# Make sure you're using sudo for system installation
+sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/ruhanirabin/sh-server-conf-backup/main/install.sh)"
+
+# Or run without sudo for user installation
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/ruhanirabin/sh-server-conf-backup/main/install.sh)"
+```
+
+#### **Network/Download issues**
+```bash
+# Test connectivity
+curl -I https://raw.githubusercontent.com/ruhanirabin/sh-server-conf-backup/main/install.sh
+
+# Alternative: Download and inspect first
+curl -fsSL https://raw.githubusercontent.com/ruhanirabin/sh-server-conf-backup/main/install.sh > install.sh
+chmod +x install.sh
+sudo ./install.sh
+```
+
+#### **Behind corporate firewall**
+```bash
+# Use manual installation method
+git clone https://github.com/ruhanirabin/sh-server-conf-backup.git
+cd sh-server-conf-backup
+sudo ./install.sh
+```
 
 ## Troubleshooting
 

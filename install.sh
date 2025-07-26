@@ -703,10 +703,33 @@ main() {
     info "You can edit this file to customize backup paths and settings."
 }
 
-# Check if script exists
+# Check if script exists, download if not (for one-line installation)
 if [[ ! -f "server-config-backup.sh" ]]; then
-    error "server-config-backup.sh not found in current directory"
-    exit 1
+    info "Main script not found, downloading from GitHub..."
+    
+    # Try to download the main script
+    if command -v curl &>/dev/null; then
+        curl -fsSL -o server-config-backup.sh https://raw.githubusercontent.com/ruhanirabin/sh-server-conf-backup/main/server-config-backup.sh
+    elif command -v wget &>/dev/null; then
+        wget -qO server-config-backup.sh https://raw.githubusercontent.com/ruhanirabin/sh-server-conf-backup/main/server-config-backup.sh
+    else
+        error "Neither curl nor wget found. Cannot download main script."
+        echo "Please install curl or wget, or download the repository manually:"
+        echo "  git clone https://github.com/ruhanirabin/sh-server-conf-backup.git"
+        exit 1
+    fi
+    
+    # Check if download was successful
+    if [[ ! -f "server-config-backup.sh" ]]; then
+        error "Failed to download server-config-backup.sh"
+        echo "Please check your internet connection or download manually:"
+        echo "  git clone https://github.com/ruhanirabin/sh-server-conf-backup.git"
+        exit 1
+    fi
+    
+    # Make it executable
+    chmod +x server-config-backup.sh
+    success "Downloaded server-config-backup.sh"
 fi
 
 main "$@"
