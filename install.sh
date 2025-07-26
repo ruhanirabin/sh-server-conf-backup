@@ -51,18 +51,46 @@ security_info() {
     echo -e "${RED}${EMOJI_LOCK} $1${NC}"
 }
 
-# Check if running as root and handle user creation
-check_root() {
+# Check installation mode and handle user creation
+check_installation_mode() {
     if [[ $EUID -eq 0 ]]; then
-        warning "Running as root. This is recommended for system-wide installation."
+        # Root installation - full system setup
+        INSTALL_MODE="system"
+        warning "Running as root - System-wide installation mode"
         warning "SECURITY: Root should NOT have SSH keys in Git providers!"
         echo
         info "Creating dedicated backup user for Git operations..."
         create_backup_user
     else
-        info "Running as regular user. Some features may require sudo privileges."
-        BACKUP_USER="$USER"
+        # Non-root installation - user mode
+        INSTALL_MODE="user"
+        info "Running as regular user - User installation mode"
+        
+        # Check if we can use sudo for some operations
+        if sudo -n true 2>/dev/null; then
+            INSTALL_MODE="user-sudo"
+            info "Sudo access detected - Enhanced user installation"
+            
+            # Ask if user wants to create system backup user
+            echo
+            read -p "Create system backup user for better security? (Y/n): " create_user
+            if [[ "${create_user:-y}" =~ ^[Yy]$ ]]; then
+                info "Creating dedicated backup user for Git operations..."
+                create_backup_user
+            else
+                BACKUP_USER="$USER"
+                warning "Using current user ($USER) for backup operations"
+                warning "This is less secure than using a dedicated backup user"
+            fi
+        else
+            BACKUP_USER="$USER"
+            warning "No sudo access - Using current user ($USER) for backup operations"
+            warning "Some features may be limited without root privileges"
+        fi
     fi
+    
+    info "Installation mode: $INSTALL_MODE"
+    info "Backup user: $BACKUP_USER"
 }
 
 # Create dedicated backup user
@@ -74,7 +102,11 @@ create_backup_user() {
         info "Backup user '$backup_user' already exists"
     else
         info "Creating backup user '$backup_user'..."
-        useradd -r -s /bin/bash -d /home/$backup_user -m "$backup_user"
+        if [[ $EUID -eq 0 ]]; then
+            useradd -r -s /bin/bash -d /home/$backup_user -m "$backup_user"
+        else
+            sudo useradd -r -s /bin/bash -d /home/$backup_user -m "$backup_user"
+        fi
         success "Created backup user '$backup_user'"
     fi
     
@@ -82,24 +114,38 @@ create_backup_user() {
     BACKUP_USER="$backup_user"
     BACKUP_USER_HOME="/home/$backup_user"
     
-    # Ensure backup user can read system config files
-    info "Configuring backup user permissions..."
-    
-    # Add backup user to necessary groups for reading config files
-    usermod -a -G adm "$backup_user" 2>/dev/null || true
-    
-    # Create sudoers rule for specific backup operations
-    cat > /etc/sudoers.d/backup-service << EOF
-# Allow backup-service user to read system configuration files
+    # Configure backup user permissions (only if we have the necessary privileges)
+    if [[ $EUID -eq 0 ]] || sudo -n true 2>/dev/null; then
+        info "Configuring backup user permissions..."
+        
+        # Add backup user to necessary groups for reading config files
+        if [[ $EUID -eq 0 ]]; then
+            usermod -a -G adm "$backup_user" 2>/dev/null || true
+        else
+            sudo usermod -a -G adm "$backup_user" 2>/dev/null || true
+        fi
+        
+        # Create sudoers rule for specific backup operations
+        local sudoers_content="# Allow backup-service user to read system configuration files
 # SECURITY: Specific paths only, no wildcards that could allow privilege escalation
 $backup_user ALL=(root) NOPASSWD: /bin/cat /etc/mysql/*, /bin/cat /etc/mariadb/*, /bin/cat /usr/local/lsws/conf/*, /bin/cat /etc/php/*, /bin/cat /etc/lsws/*
-$backup_user ALL=(root) NOPASSWD: /usr/bin/rsync --dry-run --exclude="*.log" --exclude="*.tmp" --exclude="*.cache" --exclude="*.pid" --exclude="*.sock" /etc/mysql/ /*, /usr/bin/rsync --dry-run --exclude="*.log" --exclude="*.tmp" --exclude="*.cache" --exclude="*.pid" --exclude="*.sock" /etc/mariadb/ /*, /usr/bin/rsync --dry-run --exclude="*.log" --exclude="*.tmp" --exclude="*.cache" --exclude="*.pid" --exclude="*.sock" /usr/local/lsws/conf/ /*, /usr/bin/rsync --dry-run --exclude="*.log" --exclude="*.tmp" --exclude="*.cache" --exclude="*.pid" --exclude="*.sock" /etc/php/ /*, /usr/bin/rsync --dry-run --exclude="*.log" --exclude="*.tmp" --exclude="*.cache" --exclude="*.pid" --exclude="*.sock" /etc/lsws/ /*
-$backup_user ALL=(root) NOPASSWD: /usr/bin/rsync -av --exclude="*.log" --exclude="*.tmp" --exclude="*.cache" --exclude="*.pid" --exclude="*.sock" /etc/mysql/ /*, /usr/bin/rsync -av --exclude="*.log" --exclude="*.tmp" --exclude="*.cache" --exclude="*.pid" --exclude="*.sock" /etc/mariadb/ /*, /usr/bin/rsync -av --exclude="*.log" --exclude="*.tmp" --exclude="*.cache" --exclude="*.pid" --exclude="*.sock" /usr/local/lsws/conf/ /*, /usr/bin/rsync -av --exclude="*.log" --exclude="*.tmp" --exclude="*.cache" --exclude="*.pid" --exclude="*.sock" /etc/php/ /*, /usr/bin/rsync -av --exclude="*.log" --exclude="*.tmp" --exclude="*.cache" --exclude="*.pid" --exclude="*.sock" /etc/lsws/ /*
-$backup_user ALL=(root) NOPASSWD: /usr/bin/find /etc/mysql -type f -name "*.cnf" -o -name "*.conf", /usr/bin/find /etc/mariadb -type f -name "*.cnf" -o -name "*.conf", /usr/bin/find /usr/local/lsws/conf -type f -name "*.conf" -o -name "*.xml", /usr/bin/find /etc/php -type f -name "*.ini" -o -name "*.conf", /usr/bin/find /etc/lsws -type f -name "*.conf" -o -name "*.xml"
-EOF
-    
-    chmod 440 /etc/sudoers.d/backup-service
-    success "Configured backup user permissions"
+$backup_user ALL=(root) NOPASSWD: /usr/bin/rsync --dry-run --exclude=\"*.log\" --exclude=\"*.tmp\" --exclude=\"*.cache\" --exclude=\"*.pid\" --exclude=\"*.sock\" /etc/mysql/ /*, /usr/bin/rsync --dry-run --exclude=\"*.log\" --exclude=\"*.tmp\" --exclude=\"*.cache\" --exclude=\"*.pid\" --exclude=\"*.sock\" /etc/mariadb/ /*, /usr/bin/rsync --dry-run --exclude=\"*.log\" --exclude=\"*.tmp\" --exclude=\"*.cache\" --exclude=\"*.pid\" --exclude=\"*.sock\" /usr/local/lsws/conf/ /*, /usr/bin/rsync --dry-run --exclude=\"*.log\" --exclude=\"*.tmp\" --exclude=\"*.cache\" --exclude=\"*.pid\" --exclude=\"*.sock\" /etc/php/ /*, /usr/bin/rsync --dry-run --exclude=\"*.log\" --exclude=\"*.tmp\" --exclude=\"*.cache\" --exclude=\"*.pid\" --exclude=\"*.sock\" /etc/lsws/ /*
+$backup_user ALL=(root) NOPASSWD: /usr/bin/rsync -av --exclude=\"*.log\" --exclude=\"*.tmp\" --exclude=\"*.cache\" --exclude=\"*.pid\" --exclude=\"*.sock\" /etc/mysql/ /*, /usr/bin/rsync -av --exclude=\"*.log\" --exclude=\"*.tmp\" --exclude=\"*.cache\" --exclude=\"*.pid\" --exclude=\"*.sock\" /etc/mariadb/ /*, /usr/bin/rsync -av --exclude=\"*.log\" --exclude=\"*.tmp\" --exclude=\"*.cache\" --exclude=\"*.pid\" --exclude=\"*.sock\" /usr/local/lsws/conf/ /*, /usr/bin/rsync -av --exclude=\"*.log\" --exclude=\"*.tmp\" --exclude=\"*.cache\" --exclude=\"*.pid\" --exclude=\"*.sock\" /etc/php/ /*, /usr/bin/rsync -av --exclude=\"*.log\" --exclude=\"*.tmp\" --exclude=\"*.cache\" --exclude=\"*.pid\" --exclude=\"*.sock\" /etc/lsws/ /*
+$backup_user ALL=(root) NOPASSWD: /usr/bin/find /etc/mysql -type f -name \"*.cnf\" -o -name \"*.conf\", /usr/bin/find /etc/mariadb -type f -name \"*.cnf\" -o -name \"*.conf\", /usr/bin/find /usr/local/lsws/conf -type f -name \"*.conf\" -o -name \"*.xml\", /usr/bin/find /etc/php -type f -name \"*.ini\" -o -name \"*.conf\", /usr/bin/find /etc/lsws -type f -name \"*.conf\" -o -name \"*.xml\""
+        
+        if [[ $EUID -eq 0 ]]; then
+            echo "$sudoers_content" > /etc/sudoers.d/backup-service
+            chmod 440 /etc/sudoers.d/backup-service
+        else
+            echo "$sudoers_content" | sudo tee /etc/sudoers.d/backup-service > /dev/null
+            sudo chmod 440 /etc/sudoers.d/backup-service
+        fi
+        
+        success "Configured backup user permissions"
+    else
+        warning "Cannot configure sudoers without root/sudo access"
+        warning "Backup user will have limited permissions"
+    fi
 }
 
 # Detect OS
@@ -135,10 +181,6 @@ detect_os() {
 install_dependencies() {
     info "Installing required dependencies..."
     
-    # Update package list
-    sudo apt-get update
-    
-    # Install required packages
     local packages=(
         "git"
         "rsync"
@@ -147,16 +189,56 @@ install_dependencies() {
         "wget"
     )
     
-    for package in "${packages[@]}"; do
-        if ! dpkg -l | grep -q "^ii  $package "; then
-            info "Installing $package..."
-            sudo apt-get install -y "$package"
-        else
-            info "$package is already installed"
+    # Check if we can install packages
+    if [[ $EUID -eq 0 ]]; then
+        # Root installation
+        apt-get update
+        for package in "${packages[@]}"; do
+            if ! dpkg -l | grep -q "^ii  $package "; then
+                info "Installing $package..."
+                apt-get install -y "$package"
+            else
+                info "$package is already installed"
+            fi
+        done
+    elif sudo -n true 2>/dev/null; then
+        # User with sudo
+        sudo apt-get update
+        for package in "${packages[@]}"; do
+            if ! dpkg -l | grep -q "^ii  $package "; then
+                info "Installing $package..."
+                sudo apt-get install -y "$package"
+            else
+                info "$package is already installed"
+            fi
+        done
+    else
+        # User without sudo - check if packages exist
+        warning "Cannot install packages without root/sudo access"
+        local missing_packages=()
+        
+        for package in "${packages[@]}"; do
+            if ! command -v "$package" &>/dev/null; then
+                missing_packages+=("$package")
+            else
+                info "$package is available"
+            fi
+        done
+        
+        if [[ ${#missing_packages[@]} -gt 0 ]]; then
+            error "Missing required packages: ${missing_packages[*]}"
+            echo
+            echo "Please install them manually:"
+            echo "  sudo apt-get install ${missing_packages[*]}"
+            echo
+            read -p "Continue anyway? (y/N): " continue_anyway
+            if [[ ! "$continue_anyway" =~ ^[Yy]$ ]]; then
+                exit 1
+            fi
         fi
-    done
+    fi
     
-    success "Dependencies installed successfully"
+    success "Dependencies check completed"
 }
 
 # Setup backup directory
@@ -595,7 +677,7 @@ main() {
     echo "=================================================="
     echo
     
-    check_root
+    check_installation_mode
     detect_os
     
     # Get installation directory

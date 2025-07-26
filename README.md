@@ -88,20 +88,63 @@ For self-hosted Git servers (GitLab CE, Gitea, Forgejo, etc.):
 
 ### 1. Installation
 
+The installer supports multiple installation modes depending on your privileges:
+
+#### **System-wide Installation (Recommended)**
 ```bash
-# Make scripts executable (on Linux)
+# Make scripts executable
 chmod +x install.sh server-config-backup.sh
 
-# Run installer
+# Run as root for full system installation
 sudo ./install.sh
 ```
 
-The installer will:
-- Install required dependencies (git, rsync, inotify-tools)
-- Set up the backup system in `/opt/server-backup`
-- Create a symlink at `/usr/local/bin/server-backup`
-- Configure Git settings interactively
-- Help setup SSH keys if needed
+#### **User Installation (Limited)**
+```bash
+# Run as regular user (some features may be limited)
+./install.sh
+```
+
+#### **User Installation with Sudo**
+```bash
+# Run as user with sudo access (enhanced features)
+./install.sh
+```
+
+**What the installer does:**
+- ✅ **System Mode**: Creates dedicated backup user, installs to `/opt/server-backup`, full sudo permissions
+- ✅ **User-Sudo Mode**: Can create backup user, installs to user directory, limited sudo permissions  
+- ✅ **User Mode**: Uses current user, installs to user directory, no sudo permissions
+- ✅ **All Modes**: Install dependencies (if possible), configure Git, setup SSH keys
+
+## Installation Mode Comparison
+
+| Feature | System Mode (Root) | User-Sudo Mode | User Mode |
+|---------|-------------------|-----------------|-----------|
+| **Installation Location** | `/opt/server-backup` | `~/server-backup` | `~/server-backup` |
+| **Backup User** | `backup-service` | `backup-service` (optional) | Current user |
+| **System Config Access** | ✅ Full access via sudo | ✅ Limited sudo access | ❌ User-readable only |
+| **Package Installation** | ✅ Automatic | ✅ Automatic | ❌ Manual required |
+| **Service Integration** | ✅ Systemd service | ✅ User systemd service | ❌ Manual only |
+| **Security Level** | 🔒 Highest | 🔒 High | ⚠️ Basic |
+| **Recommended For** | Production servers | Development servers | Personal use |
+
+### **When to Use Each Mode:**
+
+#### **🔒 System Mode (Root) - Production Recommended**
+- **Use when**: Production servers, multiple users, maximum security
+- **Benefits**: Dedicated backup user, full system access, systemd integration
+- **Requirements**: Root access during installation
+
+#### **🔒 User-Sudo Mode - Development/Testing**
+- **Use when**: Development servers, single user with sudo access
+- **Benefits**: Most features available, can create backup user
+- **Requirements**: Sudo access for some operations
+
+#### **⚠️ User Mode - Personal/Limited**
+- **Use when**: Personal systems, no admin access, testing only
+- **Benefits**: No special privileges needed
+- **Limitations**: Cannot backup system configs, limited functionality
 
 ### 2. Initialize Backup System
 
