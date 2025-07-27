@@ -564,6 +564,7 @@ setup_ssh_key() {
     
     if [[ "$setup_ssh" =~ ^[Yy]$ ]]; then
         local ssh_dir="${BACKUP_USER_HOME}/.ssh"
+        local ssh_key_path=""
         
         # Ensure SSH directory exists with proper permissions
         if [[ ! -d "$ssh_dir" ]]; then
@@ -605,7 +606,7 @@ setup_ssh_key() {
                     fi
                 fi
                 
-                local ssh_key_path="$ssh_dir/$selected_key"
+                ssh_key_path="$ssh_dir/$selected_key"
             else
                 # Generate new key with unique name
                 local unique_key_name=$(generate_unique_key_name)
@@ -621,12 +622,23 @@ setup_ssh_key() {
                 if [[ "$key_type_choice" == "1" ]]; then
                     ssh_key_path="$ssh_dir/${unique_key_name}_rsa"
                     info "Generating RSA SSH key for $BACKUP_USER with unique name: ${unique_key_name}_rsa"
-                    sudo -u "$BACKUP_USER" ssh-keygen -t rsa -b 4096 -C "$git_email" -f "$ssh_key_path" -N ""
+                    if ! sudo -u "$BACKUP_USER" ssh-keygen -t rsa -b 4096 -C "$git_email" -f "$ssh_key_path" -N ""; then
+                        error "Failed to generate RSA SSH key"
+                        exit 1
+                    fi
                 else
                     ssh_key_path="$ssh_dir/${unique_key_name}_ed25519"
                     info "Generating Ed25519 SSH key for $BACKUP_USER with unique name: ${unique_key_name}_ed25519"
-                    sudo -u "$BACKUP_USER" ssh-keygen -t ed25519 -C "$git_email" -f "$ssh_key_path" -N ""
+                    if ! sudo -u "$BACKUP_USER" ssh-keygen -t ed25519 -C "$git_email" -f "$ssh_key_path" -N ""; then
+                        error "Failed to generate Ed25519 SSH key"
+                        exit 1
+                    fi
                 fi
+                
+                # Set proper permissions for SSH keys
+                chmod 600 "$ssh_key_path"
+                chmod 644 "$ssh_key_path.pub"
+                chown "$BACKUP_USER:$BACKUP_USER" "$ssh_key_path" "$ssh_key_path.pub"
                 
                 success "SSH key generated at $ssh_key_path"
             fi
@@ -643,14 +655,25 @@ setup_ssh_key() {
             key_type_choice=${key_type_choice:-2}
             
             if [[ "$key_type_choice" == "1" ]]; then
-                local ssh_key_path="$ssh_dir/${unique_key_name}_rsa"
+                ssh_key_path="$ssh_dir/${unique_key_name}_rsa"
                 info "Generating RSA SSH key for $BACKUP_USER with unique name: ${unique_key_name}_rsa"
-                sudo -u "$BACKUP_USER" ssh-keygen -t rsa -b 4096 -C "$git_email" -f "$ssh_key_path" -N ""
+                if ! sudo -u "$BACKUP_USER" ssh-keygen -t rsa -b 4096 -C "$git_email" -f "$ssh_key_path" -N ""; then
+                    error "Failed to generate RSA SSH key"
+                    exit 1
+                fi
             else
-                local ssh_key_path="$ssh_dir/${unique_key_name}_ed25519"
+                ssh_key_path="$ssh_dir/${unique_key_name}_ed25519"
                 info "Generating Ed25519 SSH key for $BACKUP_USER with unique name: ${unique_key_name}_ed25519"
-                sudo -u "$BACKUP_USER" ssh-keygen -t ed25519 -C "$git_email" -f "$ssh_key_path" -N ""
+                if ! sudo -u "$BACKUP_USER" ssh-keygen -t ed25519 -C "$git_email" -f "$ssh_key_path" -N ""; then
+                    error "Failed to generate Ed25519 SSH key"
+                    exit 1
+                fi
             fi
+            
+            # Set proper permissions for SSH keys
+            chmod 600 "$ssh_key_path"
+            chmod 644 "$ssh_key_path.pub"
+            chown "$BACKUP_USER:$BACKUP_USER" "$ssh_key_path" "$ssh_key_path.pub"
             
             success "SSH key generated at $ssh_key_path"
         fi
