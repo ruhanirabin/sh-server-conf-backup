@@ -1740,10 +1740,6 @@ perform_backup() {
             else
                 webhook_backup_success "$duration" "$files_backed_up" "no-commit"
             fi
-            else
-                success "Backup completed (not pushed - AUTO_COMMIT is disabled)"
-                local duration=$(echo "$(date +%s.%N) - $start_time" | bc 2>/dev/null || echo "0")
-                webhook_backup_success "$duration" "$files_backed_up" "$commit_hash"
             fi
         fi
         
