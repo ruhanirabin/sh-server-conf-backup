@@ -1207,23 +1207,21 @@ detect_affected_services() {
     local services=()
     
     for path in "${changed_paths[@]}"; do
-        case "$path" in
-            */mysql*|*/mariadb*)
+        case "$(basename "$path")" in
+            "mysql"|"mariadb")
                 services+=("mysql" "mariadb")
                 ;;
-            */php*)
-                # Detect PHP-FPM services
-                local php_services=($(systemctl list-units --type=service --state=active | grep -E 'php[0-9.]*-fpm' | awk '{print $1}' | sed 's/.service//'))
-                services+=("${php_services[@]}")
+            "php"|"php-fpm"|"php.ini")
+                services+=("php-fpm")
                 ;;
-            */apache*|*/httpd*)
-                services+=("apache2" "httpd")
+            "lsws"|"httpd"|"apache2")
+                services+=("lsws" "httpd" "apache2")
                 ;;
-            */nginx*)
-                services+=("nginx")
-                ;;
-            */lsws*|*/litespeed*)
-                services+=("lsws")
+            *)
+                # Try to detect service by path
+                if [[ "$path" =~ ^/etc/(php|mysql|mariadb|apache2|httpd|lsws)/ ]]; then
+                    services+=("${BASH_REMATCH[1]}")
+                fi
                 ;;
         esac
     done
@@ -1245,29 +1243,20 @@ check_service_health() {
     # Service-specific health checks
     case "$service_name" in
         mysql|mariadb)
-            # Try to connect to MySQL
-            timeout "$timeout" mysql -e "SELECT 1;" >/dev/null 2>&1
+            timeout "$timeout" mysqladmin ping &>/dev/null
             ;;
         apache2|httpd)
-            # Check if Apache is responding
-            timeout "$timeout" curl -s -o /dev/null http://localhost/ 2>/dev/null
+            timeout "$timeout" curl -s http://localhost/server-status &>/dev/null
             ;;
-        nginx)
-            # Check if Nginx is responding
-            timeout "$timeout" curl -s -o /dev/null http://localhost/ 2>/dev/null
-            ;;
-        php*-fpm)
-            # Check PHP-FPM status
-            systemctl is-active "$service_name" >/dev/null 2>&1
+        php-fpm)
+            timeout "$timeout" systemctl status php*-fpm | grep -q "active (running)"
             ;;
         lsws)
-            # Check OpenLiteSpeed
-            timeout "$timeout" curl -s -o /dev/null http://localhost:8088/ 2>/dev/null || \
-            timeout "$timeout" curl -s -o /dev/null http://localhost/ 2>/dev/null
+            timeout "$timeout" /usr/local/lsws/bin/lswsctrl status | grep -q "litespeed is running"
             ;;
         *)
-            # Generic service check
-            systemctl is-active "$service_name" >/dev/null 2>&1
+            # Default to systemctl check
+            timeout "$timeout" systemctl is-active "$service_name" &>/dev/null
             ;;
     esac
 }
@@ -1745,15 +1734,12 @@ perform_backup() {
             commit_hash=$(git_as_backup_user rev-parse HEAD)
             
             if [[ "$AUTO_COMMIT" == true ]]; then
-                if git_as_backup_user push origin "$GIT_BRANCH"; then
-                    success "Backup completed and pushed to repository"
-                    local duration=$(echo "$(date +%s.%N) - $start_time" | bc 2>/dev/null || echo "0")
-                    webhook_backup_success "$duration" "$files_backed_up" "$commit_hash"
-                else
-                    warning "Failed to push to remote repository"
-                    local duration=$(echo "$(date +%s.%N) - $start_time" | bc 2>/dev/null || echo "0")
-                    webhook_backup_failed "Failed to push to remote repository" "$duration"
-                fi
+                commit_hash=$(git_as_backup_user commit -m "Backup for $HOSTNAME on $(date '+%Y-%m-%d %H:%M:%S')")
+                git_as_backup_user push origin "$GIT_BRANCH"
+                webhook_backup_success "$duration" "$files_backed_up" "$commit_hash"
+            else
+                webhook_backup_success "$duration" "$files_backed_up" "no-commit"
+            fi
             else
                 success "Backup completed (not pushed - AUTO_COMMIT is disabled)"
                 local duration=$(echo "$(date +%s.%N) - $start_time" | bc 2>/dev/null || echo "0")
@@ -2456,6 +2442,7 @@ main() {
                         error_exit "Unknown backup option: $1"
                         ;;
                 esac
+                shift
             done
             
             perform_backup "$validate_first" "$restart_services"
